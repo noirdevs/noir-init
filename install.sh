@@ -1,22 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.17.6"
-BASE_URL="https://raw.githubusercontent.com/noirdevs/noir-init/main/bundle"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+NOIR_HOME="${HOME}/.noir"
+NOIR_BIN="${NOIR_HOME}/bin"
+NOIR_SKILLS="${NOIR_HOME}/skills"
+NOIR_TEMPLATES="${NOIR_HOME}/templates"
 
-ARCHIVE="$TMP_DIR/noir-init-$VERSION.zip"
+[[ -f "$ROOT/noir/bin/noir-init" ]] || { echo "ERROR: missing noir/bin/noir-init" >&2; exit 1; }
+[[ -d "$ROOT/noir/skills" ]] || { echo "ERROR: missing noir/skills" >&2; exit 1; }
+[[ -d "$ROOT/noir/templates" ]] || { echo "ERROR: missing noir/templates" >&2; exit 1; }
 
-echo "Installing Noir Init $VERSION..."
+bash -n "$ROOT/noir/bin/noir-init"
+rm -rf "$NOIR_HOME"
+rm -f "$HOME/.local/bin/noir-init"
+mkdir -p "$NOIR_BIN" "$NOIR_SKILLS" "$NOIR_TEMPLATES"
+install -m 0755 "$ROOT/noir/bin/noir-init" "$NOIR_BIN/noir-init"
+cp -a "$ROOT/noir/skills/." "$NOIR_SKILLS/"
+cp -a "$ROOT/noir/templates/." "$NOIR_TEMPLATES/"
 
-command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required." >&2; exit 1; }
-command -v unzip >/dev/null 2>&1 || { echo "ERROR: unzip is required." >&2; exit 1; }
+case "${SHELL##*/}" in
+  zsh) rc="$HOME/.zshrc"; line='export PATH="$HOME/.noir/bin:$PATH"' ;;
+  fish) rc="$HOME/.config/fish/config.fish"; mkdir -p "$(dirname "$rc")"; line='fish_add_path "$HOME/.noir/bin"' ;;
+  *) rc="$HOME/.bashrc"; line='export PATH="$HOME/.noir/bin:$PATH"' ;;
+esac
+[[ -f "$rc" ]] || touch "$rc"
+grep -Fqx "$line" "$rc" || printf '\n%s\n' "$line" >> "$rc"
+export PATH="$HOME/.noir/bin:$PATH"
+"$NOIR_BIN/noir-init" --version
 
-curl -fsSL "$BASE_URL/noir-init-$VERSION.zip" -o "$ARCHIVE"
-unzip -q "$ARCHIVE" -d "$TMP_DIR/unpacked"
-
-BUNDLE="$TMP_DIR/unpacked/noir-init-$VERSION"
-[[ -d "$BUNDLE" ]] || { echo "ERROR: invalid Noir Init bundle." >&2; exit 1; }
-
-exec bash "$BUNDLE/install.sh"
+echo "Noir Init installed to ~/.noir"
+echo "Binary: ~/.noir/bin/noir-init"
+echo "Skills: ~/.noir/skills"
+echo "Templates: ~/.noir/templates"
+echo "Project skill execution surface: .claude/skills"
