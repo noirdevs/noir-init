@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+VERSION="0.17.6"
+NOIR_HOME="${NOIR_HOME:-$HOME/.noir}"
+NOIR_TEMPLATES="${NOIR_TEMPLATES:-$NOIR_HOME/templates}"
+NOIR_SKILLS="${NOIR_SKILLS:-$NOIR_HOME/skills}"
+
+NOIR_REQUIRED_SKILLS=(
+  "noir-scope"
+  "noir-techstack"
+  "noir-planner"
+  "noir-designer"
+  "noir-threat"
+  "noir-coder"
+  "noir-quality"
+  "noir-security"
+)
+
+usage() {
+  cat <<'EOF'
+Usage:
+  noir-init --version
+  noir-init new <project-name>
+  noir-init stack [--ai|--manual]
+  noir-init stack sync
+EOF
+}
+
+is_required_skill() {
+  local skill="$1" required
+  for required in "${NOIR_REQUIRED_SKILLS[@]}"; do
+    [[ "$required" == "$skill" ]] && return 0
+  done
+  return 1
+}
+
+link_selected_skills() {
+  local skill source target
+  mkdir -p .claude/skills
+  for skill in "${RESOLVED_SKILLS[@]}"; do
+    source="$NOIR_SKILLS/$skill"
+    [[ -d "$source" ]] || { echo "ERROR: skill not installed: $skill" >&2; return 1; }
+    target=".claude/skills/$skill"
+    if [[ -e "$target" && ! -L "$target" ]]; then rm -rf "$target"; fi
+    ln -sfn "$source" "$target"
+  done
+}
+
+bootstrap_required_skills() {
+  local project_dir="${1:-.}" skill source target
+  mkdir -p "$project_dir/.claude/skills"
+  for skill in "${NOIR_REQUIRED_SKILLS[@]}"; do
+    source="$NOIR_SKILLS/$skill"
+    [[ -d "$source" ]] || { echo "ERROR: required skill missing: $skill" >&2; return 1; }
+    target="$project_dir/.claude/skills/$skill"
+    if [[ -e "$target" && ! -L "$target" ]]; then rm -rf "$target"; fi
+    ln -sfn "$source" "$target"
+  done
+}
+
+require_project() {
+  [[ -d .noir ]] || { echo "ERROR: not a Noir project" >&2; return 1; }
+}
+
+init_project() {
+  local project_dir="$1" project_name="$2"
+  mkdir -p "$project_dir/.noir/events" "$project_dir/docs"
+  bootstrap_required_skills "$project_dir" || return 1
+  [[ -f "$project_dir/AGENTS.md" ]] || cp "$NOIR_TEMPLATES/AGENTS.md" "$project_dir/AGENTS.md"
+  [[ -f "$project_dir/CLAUDE.md" ]] || cp "$NOIR_TEMPLATES/CLAUDE.md" "$project_dir/CLAUDE.md"
+  [[ -f "$project_dir/STACK.md" ]] || cp "$NOIR_TEMPLATES/STACK.md" "$project_dir/STACK.md"
+  printf '%s\n' "name=$project_name" "version=$VERSION" > "$project_dir/.noir/project.conf"
+  printf '%s\n' "initialized=$VERSION" > "$project_dir/.noir/state"
+  printf '%s\n' "${NOIR_REQUIRED_SKILLS[@]}" > "$project_dir/.noir/skill-manifest.json"
+}
+
+stack_sync() {
+  require_project || return 1
+  bootstrap_required_skills "." || return 1
+  RESOLVED_SKILLS=("${NOIR_REQUIRED_SKILLS[@]}")
+  link_selected_skills
+}
+
+main() {
+  case "${1:-}" in
+    --version|-v) echo "noir-init $VERSION" ;;
+    new)
+      [[ -n "${2:-}" ]] || { usage; return 1; }
+      local base="${NOIR_PROJECT_BASE:-$HOME/project}" name="$2"
+      local project_dir="$base/$name"
+      [[ ! -e "$project_dir" ]] || { echo "ERROR: project already exists: $project_dir" >&2; return 1; }
+      mkdir -p "$base"
+      init_project "$project_dir" "$name"
+      echo "Created $project_dir"
+      ;;
+    stack)
+      case "${2:-}" in
+        sync) stack_sync ;;
+        --ai|--manual) echo "Stack selection mode: ${2#--}" ;;
+        *) usage; return 1 ;;
+      esac
+      ;;
+    *) usage; return 1 ;;
+  esac
+}
+
+main "$@"
